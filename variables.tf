@@ -10,14 +10,9 @@ variable "database_name" {
   description = "Database Name"
 }
 
-variable "database_name" {
-  description = "Database name"
+variable "database_username" {
+  description = "Database username"
 }
-
-variable "database_password" {
-  description = "Database password"
-}
-
 
 variable "database_password_ssm_key" {
   description = "Password stored in AWS SSM"
@@ -34,4 +29,3 @@ variable "subnet_ids" {
 variable "tags" {
   default = []
 }
-

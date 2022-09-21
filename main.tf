@@ -10,7 +10,8 @@ module "database_password" {
 }
 
 module "redshift" {
-  source = "terraform-aws-modules/redshift/aws"
+  source  = "terraform-aws-modules/redshift/aws"
+  version = "4.0.1"
 
   cluster_identifier    = var.name
   allow_version_upgrade = true
