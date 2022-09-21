@@ -27,5 +27,5 @@ variable "subnet_ids" {
 }
 
 variable "tags" {
-  default = []
+  default = {}
 }

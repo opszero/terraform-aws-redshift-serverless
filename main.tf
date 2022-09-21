@@ -72,7 +72,7 @@ module "redshift" {
 
   # Subnet group
   subnet_group_name        = var.name
-  subnet_group_description = ""
+  subnet_group_description = var.name
   subnet_group_tags        = local.tags
 
   # Snapshot schedule
