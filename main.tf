@@ -23,11 +23,10 @@ module "redshift" {
   master_password        = module.database_password.secret_value
   create_random_password = false
 
-  encrypted                            = true
-  enhanced_vpc_routing                 = true
-  vpc_security_group_ids               = var.security_group_ids
-  subnet_ids                           = var.subnet_ids
-  availability_zone_relocation_enabled = true
+  encrypted              = true
+  enhanced_vpc_routing   = true
+  vpc_security_group_ids = var.security_group_ids
+  subnet_ids             = var.subnet_ids
 
   logging = {
     enable = false
