@@ -1,3 +1,9 @@
+locals {
+  tags = merge(var.tags, {
+    Name = var.name
+  })
+}
+
 module "database_password" {
   source = "github.com/opszero/terraform-aws-ssm"
   secret = var.database_password_ssm_key
@@ -12,7 +18,7 @@ module "redshift" {
   number_of_nodes       = 1
 
   database_name          = var.database_name
-  master_username        = var.database_password
+  master_username        = var.database_username
   master_password        = module.database_password.secret_value
   create_random_password = false
 
@@ -66,7 +72,7 @@ module "redshift" {
   # Subnet group
   subnet_group_name        = var.name
   subnet_group_description = ""
-  subnet_group_tags = var.tags
+  subnet_group_tags        = local.tags
 
   # Snapshot schedule
   # create_snapshot_schedule        = true
@@ -95,5 +101,5 @@ module "redshift" {
   #   }
   # }
 
-  tags = var.tags
+  tags = local.tags
 }
