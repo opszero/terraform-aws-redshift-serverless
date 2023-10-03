@@ -1,105 +1,121 @@
-locals {
-  tags = merge(var.tags, {
-    Name = var.name
-  })
+resource "random_password" "master_password" {
+  count            = var.create && var.admin_user_password == "" ? 1 : 0
+  length           = var.random_password_length
+  min_lower        = 1
+  min_numeric      = 1
+  min_special      = 1
+  min_upper        = 1
+  special          = false
+  override_special = "!#$%&*()-_=+[]{}<>:?"
 }
 
-module "database_password" {
-  source = "github.com/opszero/terraform-aws-ssm"
-  secret = var.database_password_ssm_key
+resource "aws_iam_role" "role" {
+  count              = var.create && var.iam_role_enabled ? 1 : 0
+  name               = var.iam_role_name
+  assume_role_policy = var.assume_role_policy
+  tags               = var.tags
 }
 
-module "redshift" {
-  source  = "terraform-aws-modules/redshift/aws"
-  version = "4.0.1"
+resource "aws_iam_role_policy" "policy" {
+  count  = var.create && var.policy_enabled && var.iam_role_enabled && var.policy_arn == "" ? 1 : 0
+  name   = var.policy_name == "" ? format("%s-policy", var.iam_role_name) : var.policy_name
+  role   = aws_iam_role.role.*.id[0]
+  policy = var.policy
+}
 
-  cluster_identifier    = var.name
-  allow_version_upgrade = true
-  node_type             = var.node_type
-  number_of_nodes       = 1
+resource "aws_iam_role_policy_attachment" "policy_attachment" {
+  count      = var.create && var.policy_enabled && var.iam_role_enabled && var.policy_arn != "" ? 1 : 0
+  role       = aws_iam_role.role.*.id[0]
+  policy_arn = var.policy_arn
+}
 
-  database_name          = var.database_name
-  master_username        = var.database_username
-  master_password        = module.database_password.secret_value
-  create_random_password = false
+resource "aws_kms_key" "kms" {
+  count                   = var.create && var.kms_enabled ? 1 : 0
+  deletion_window_in_days = 10
+  key_usage               = "ENCRYPT_DECRYPT"
+}
 
-  encrypted              = true
-  enhanced_vpc_routing   = true
+resource "aws_kms_alias" "alias" {
+  count         = var.create && var.kms_enabled ? 1 : 0
+  name          = var.kms_alias
+  target_key_id = join("", aws_kms_key.kms.*.key_id)
+}
+
+resource "aws_redshiftserverless_namespace" "namespace" {
+  count                = var.create ? 1 : 0
+  namespace_name       = var.namespace_name
+  admin_username       = var.admin_username
+  admin_user_password  = var.admin_user_password == "" ? join("", random_password.master_password.*.result) : var.admin_user_password
+  db_name              = var.db_name
+  default_iam_role_arn = var.iam_role_enabled ? join("", aws_iam_role.role.*.arn) : ""
+  iam_roles            = var.iam_role_enabled ? [join("", aws_iam_role.role.*.arn)] : []
+  kms_key_id           = var.kms_enabled == true ? join("", aws_kms_key.kms.*.arn) : var.kms_key_id
+  log_exports          = var.log_exports
+  tags                 = var.tags
+}
+
+resource "aws_redshiftserverless_workgroup" "workgroup" {
+  count                = var.create ? 1 : 0
+  namespace_name       = join("", aws_redshiftserverless_namespace.namespace.*.id)
+  workgroup_name       = var.workgroup_name
+  base_capacity        = var.base_capacity
+  enhanced_vpc_routing = var.enhanced_vpc_routing
+  publicly_accessible  = var.publicly_accessible
+  security_group_ids   = var.security_group_ids
+  subnet_ids           = var.subnet_ids
+  tags                 = var.tags
+  dynamic "config_parameter" {
+    for_each = var.config_parameter != [] ? var.config_parameter : []
+    content {
+      parameter_key   = config_parameter.value.parameter_key
+      parameter_value = config_parameter.value.parameter_value
+    }
+  }
+}
+
+resource "aws_redshiftserverless_usage_limit" "usage_limit" {
+  count         = var.create ? 1 : 0
+  resource_arn  = join("", aws_redshiftserverless_workgroup.workgroup.*.arn)
+  usage_type    = var.usage_type
+  amount        = var.amount
+  breach_action = var.breach_action
+  period        = var.period
+}
+
+resource "aws_redshiftserverless_endpoint_access" "endpoint" {
+  depends_on             = [aws_redshiftserverless_workgroup.workgroup]
+  count                  = var.create && var.endpoint_enable ? 1 : 0
+  endpoint_name          = var.endpoint_name
+  workgroup_name         = join("", aws_redshiftserverless_workgroup.workgroup.*.id)
   vpc_security_group_ids = var.security_group_ids
   subnet_ids             = var.subnet_ids
+}
 
-  logging = {
-    enable = false
-  }
+resource "aws_redshiftserverless_snapshot" "snapshot" {
+  count            = var.create && var.snapshot_enable ? 1 : 0
+  namespace_name   = join("", aws_redshiftserverless_workgroup.workgroup.*.namespace_name)
+  snapshot_name    = var.snapshot_name
+  retention_period = var.retention_period
+}
 
-  # Parameter group
-  # parameter_group_name        = "example-custom"
-  # parameter_group_description = "Custom parameter group for example cluster"
-  # parameter_group_parameters = {
-  #   wlm_json_configuration = {
-  #     name = "wlm_json_configuration"
-  #     value = jsonencode([
-  #       {
-  #         query_concurrency = 15
-  #       }
-  #     ])
-  #   }
-  #   require_ssl = {
-  #     name  = "require_ssl"
-  #     value = true
-  #   }
-  #   use_fips_ssl = {
-  #     name  = "use_fips_ssl"
-  #     value = false
-  #   }
-  #   enable_user_activity_logging = {
-  #     name  = "enable_user_activity_logging"
-  #     value = true
-  #   }
-  #   max_concurrency_scaling_clusters = {
-  #     name  = "max_concurrency_scaling_clusters"
-  #     value = 3
-  #   }
-  #   enable_case_sensitive_identifier = {
-  #     name  = "enable_case_sensitive_identifier"
-  #     value = true
-  #   }
-  # }
-  # parameter_group_tags = {
-  #   Additional = "CustomParameterGroup"
-  # }
+resource "aws_redshiftserverless_resource_policy" "main" {
+  count        = var.create && var.snapshot_policy_enable ? 1 : 0
+  resource_arn = join("", aws_redshiftserverless_snapshot.snapshot.*.arn)
+  policy       = var.serverless_resource_policy
+}
 
-  # Subnet group
-  subnet_group_name        = var.name
-  subnet_group_description = var.name
-  subnet_group_tags        = local.tags
+resource "aws_secretsmanager_secret" "secret" {
+  count = var.create && var.secrets_manager_enabled ? 1 : 0
+  name  = var.secrets_manager_name
+}
 
-  # Snapshot schedule
-  # create_snapshot_schedule        = true
-  # snapshot_schedule_identifier    = local.name
-  # use_snapshot_identifier_prefix  = true
-  # snapshot_schedule_description   = "Example snapshot schedule"
-  # snapshot_schedule_definitions   = ["rate(12 hours)"]
-  # snapshot_schedule_force_destroy = true
-
-  # Usage limits
-  # usage_limits = {
-  #   currency_scaling = {
-  #     feature_type  = "concurrency-scaling"
-  #     limit_type    = "time"
-  #     amount        = 60
-  #     breach_action = "emit-metric"
-  #   }
-  #   spectrum = {
-  #     feature_type  = "spectrum"
-  #     limit_type    = "data-scanned"
-  #     amount        = 2
-  #     breach_action = "disable"
-  #     tags = {
-  #       Additional = "CustomUsageLimits"
-  #     }
-  #   }
-  # }
-
-  tags = local.tags
+resource "aws_secretsmanager_secret_version" "secrets_version" {
+  count         = var.create && var.secrets_manager_enabled ? 1 : 0
+  secret_id     = join("", aws_secretsmanager_secret.secret.*.id)
+  secret_string = <<EOF
+   {
+    "username": "${var.admin_username}",
+    "password": "${var.admin_user_password == "" ? join("", random_password.master_password.*.result) : var.admin_user_password}"
+   }
+EOF
 }
